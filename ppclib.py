@@ -213,6 +213,7 @@ def get_parameter(s):
             parameter[key] = value
     return parameter
 
+# Extract the parameters string from the 'parameter' column df3 to SVID and ECID dataframe
 from tqdm import tqdm
 import polars as pl
 def param_spliting(df3):
@@ -269,7 +270,74 @@ def param_spliting(df3):
         pl.col("CreateTime").dt.epoch('s').alias("CreateTimeUnix")
     )
     return (df3,SVID,ECID)
-
+    
+# Join df3, SVID and ECID dataframe and combine to result polar dataframe
+import duckdb
+def combine(df3,SVID,ECID):
+    # Configure DuckDB to work in memory-constrained environments
+    duckdb.execute("SET temp_directory='C:/Users/RYZEN/datamining/saw/temp';")  # Use SSD if possible
+    
+    # Query directly on the DataFrame (no need to load into a database)
+    result = duckdb.sql("""
+        SELECT df3.EquipID, Recipe, df3.CreateTime, df3.CreateTimeUnix, df3.EventDesc,
+        SAW_ProductionStock_Z1, BladeOD_Z1, BladeThickness_Z1, FlangeODType_Z1,
+        SAW_ProductionStock_Z2, BladeOD_Z2, BladeThickness_Z2, FlangeODType_Z2,
+        ECID."4280" AS ECID_4280, 
+        ECID."4290" AS ECID_4290, 
+        ECID."6603" AS ECID_6603, 
+        ECID."6611" AS ECID_6611,
+        ECID."6607" AS ECID_6607, 
+        ECID."6615" AS ECID_6615, 
+        ECID."4628" AS ECID_4628,
+        ECID."4629" AS ECID_4629,
+        ECID."6641" AS ECID_6641,
+        ECID."16009" AS ECID_16009,
+        ECID."16058" AS ECID_16058,
+        ECID."6640" AS ECID_6640,
+        ECID."16008" AS ECID_16008,
+        ECID."16057" AS ECID_16057,
+        ECID."6636" AS ECID_6636,
+        ECID."16004" AS ECID_16004,
+        ECID."16053" AS ECID_16053,
+        ECID."6637" AS ECID_6637,
+        ECID."16005" AS ECID_16005,
+        ECID."16054" AS ECID_16054,
+        ECID."6666" AS ECID_6666,
+        ECID."16034" AS ECID_16034,
+        ECID."16132" AS ECID_16132,
+        ECID."4204" AS ECID_4204,
+        ECID."4205" AS ECID_4205,
+        SVID."1404" AS SVID_1404,
+        SVID."1405" AS SVID_1405,
+        SVID."3223" AS SVID_3223,
+        SVID."1412" AS SVID_1412,
+        SVID."1413" AS SVID_1413,
+        SVID."1400" AS SVID_1400,
+        SVID."1401" AS SVID_1401,
+        SVID."1763" AS SVID_1763,
+        SVID."1765" AS SVID_1765,
+        SVID."1352" AS SVID_1352,
+        SVID."1353" AS SVID_1353,
+        SVID."1771" AS SVID_1771,
+        SVID."1775" AS SVID_1775,
+        SVID."1502" AS SVID_1502,
+        SVID."1503" AS SVID_1503,
+        SVID."1760" AS SVID_1760,
+        SVID."1759" AS SVID_1759,
+        SVID."1755" AS SVID_1755,
+        SVID."1756" AS SVID_1756,
+        SVID."1500" AS SVID_1500,
+        SVID."1501" AS SVID_1501,
+        SVID."1785" AS SVID_1785,
+        SVID."1764" AS SVID_1764,
+        SVID."1766" AS SVID_1766
+        FROM df3, SVID, ECID
+        WHERE df3.EquipID = SVID.EquipID AND df3.EquipID = ECID.EquipID AND df3.EquipID LIKE '%'
+        AND df3.CreateTimeUnix = SVID.CreateTimeUnix AND df3.CreateTimeUnix = ECID.CreateTimeUnix AND df3.Parameter LIKE '4280%'
+        ORDER BY df3.EquipID, df3.CreateTime ASC
+    """).to_df()
+    return result
+    
 if __name__ == "__main__":
     test_date = "2025-03-21"
     api_response = fetch_ppc_data(test_date)
