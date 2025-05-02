@@ -332,7 +332,7 @@ def combine(df3,SVID,ECID):
         SVID."1764" AS SVID_1764,
         SVID."1766" AS SVID_1766
         FROM df3, SVID, ECID
-        WHERE df3.EquipID = SVID.EquipID AND df3.EquipID = ECID.EquipID AND df3.EquipID LIKE '%'
+        WHERE df3.EquipID = SVID.EquipID AND df3.EquipID = ECID.EquipID AND df3.EquipID LIKE '%' AND df3.Recipe LIKE '%'
         AND df3.CreateTimeUnix = SVID.CreateTimeUnix AND df3.CreateTimeUnix = ECID.CreateTimeUnix AND df3.Parameter LIKE '4280%'
         ORDER BY df3.EquipID, df3.CreateTime ASC
     """).to_df()
