@@ -332,11 +332,202 @@ def combine(df3,SVID,ECID):
         SVID."1764" AS SVID_1764,
         SVID."1766" AS SVID_1766
         FROM df3, SVID, ECID
-        WHERE df3.EquipID = SVID.EquipID AND df3.EquipID = ECID.EquipID AND df3.EquipID LIKE '%' AND df3.Recipe LIKE '%'
+        WHERE df3.EquipID = SVID.EquipID AND df3.EquipID = ECID.EquipID 
         AND df3.CreateTimeUnix = SVID.CreateTimeUnix AND df3.CreateTimeUnix = ECID.CreateTimeUnix AND df3.Parameter LIKE '4280%'
         ORDER BY df3.EquipID, df3.CreateTime ASC
     """).to_df()
     return result
+
+# Anomaly Detection with Isolation Forest Code on result PANDAS dataframe
+#import pandas as pd
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+def anamoly_det(result):
+    # Initial cleaning
+    dfx = result.dropna(axis=1, how='all')          # Drop completely empty columns
+    dfx = dfx.dropna(axis=0, how='any')              # Drop rows with any missing values
+    df = dfx.drop(['CreateTime', 'CreateTimeUnix'], axis=1)  # Remove time columns
+    
+    # Free Memory
+    result = []
+    
+    # Preserve original categorical values before encoding
+    original_cat_columns = df.select_dtypes(include='object').copy()
+    encoded_df = df.copy()
+    
+    # Label encode categorical columns
+    cat_cols = original_cat_columns.columns
+    label_encoders = {}
+    for col in cat_cols:
+        le = LabelEncoder()
+        encoded_df[col] = le.fit_transform(encoded_df[col].astype(str))
+        label_encoders[col] = le
+    
+    # Train Isolation Forest and get scores
+    model = IsolationForest(
+        n_estimators=200,
+        contamination=0.05,
+        random_state=42
+    )
+    model.fit(encoded_df)
+    
+    # Get anomaly scores and normalize them to 0-1 range
+    scores = model.decision_function(encoded_df)
+    scaler = MinMaxScaler()
+    normalized_scores = scaler.fit_transform(scores.reshape(-1, 1))
+    
+    # Create results dataframe with original values and scores
+    encoded_df['AnomalyScore'] = scores  # Original scores (-0.5 to 0.5)
+    encoded_df['AnomalyScore_normalized'] = normalized_scores  # 0-1 scaled
+    
+    results_df = pd.concat([
+        encoded_df[['AnomalyScore', 'AnomalyScore_normalized']],
+        dfx[['CreateTime','CreateTimeUnix']], original_cat_columns,
+        df.select_dtypes(exclude='object')
+    ], axis=1)
+    
+    # Sort by anomaly score for better inspection
+    #results_df = results_df.sort_values('AnomalyScore_normalized', ascending=False)
+    
+    # Extract anomalies with original values
+    #anomalies_df = results_df[results_df['AnomalyScore_normalized'] > 0.5]  # Adjust threshold as needed
+    #print(f"Found {len(anomalies_df)} anomalies from {len(df)} total records")
+    #print("\nTop 5 anomalies:")
+    #print(anomalies_df.head())
+    
+    # Verification metrics
+    # print("\nScore Statistics:")
+    # print(f"Mean score: {results_df.AnomalyScore_normalized.mean():.2f}")
+    # print(f"Max score: {results_df.AnomalyScore_normalized.max():.2f}")
+    # print(f"Min score: {results_df.AnomalyScore_normalized.min():.2f}")
+
+    return results_df
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+def plot_equipid_violin(anomalies_df):
+    # Set plot style and size
+    plt.figure(figsize=(14, 8))
+    
+    # Create violin plot (shows distribution density)
+    sns.violinplot(
+        x='EquipID',
+        y='AnomalyScore_normalized',
+        data=anomalies_df, 
+        inner='quartile'  # Adds quartile lines inside the violin
+    )
+    
+    # Improve readability
+    plt.title('Distribution of Normalized Anomaly Scores by Equipment ID', fontsize=14)
+    plt.xlabel('Equipment ID', fontsize=10)
+    plt.ylabel('Normalized Anomaly Score', fontsize=14)
+    plt.xticks(rotation=45, ha='right')  # Rotate x-axis labels
+    
+    # Add gridlines for clarity
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.show()
+
+# Sort data and calculate moving average
+def plot_trend(anomalies_df):
+    df = anomalies_df.sort_values('CreateTime')
+    window_size = 30  # Adjust this based on your data frequency
+    df['AnomalyScore_smoothed'] = df['AnomalyScore_normalized'].rolling(
+        window=window_size,
+        min_periods=1,
+        center=True
+    ).mean()
+    
+    plt.figure(figsize=(14, 7))
+    
+    # Plot original data with transparency
+    sns.lineplot(
+        data=df,
+        x='CreateTime',
+        y='AnomalyScore_normalized',
+        color='#abd9e9',
+        linewidth=0.7,
+        alpha=0.4,
+        label='Original Values'
+    )
+    
+    # Plot smoothed trend line
+    sns.lineplot(
+        data=df,
+        x='CreateTime',
+        y='AnomalyScore_smoothed',
+        color='#2c7bb6',
+        linewidth=1.5,
+        label=f'Smoothed ({window_size}-period MA)'
+    )
+    
+    plt.title('Normalized Anomaly Score Trend with Noise Reduction', fontsize=14, pad=20)
+    plt.xlabel('Create Time', fontsize=12)
+    plt.ylabel('Score Value', fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.legend(loc='upper left')
+    
+    # Format x-axis dates
+    plt.xticks(rotation=45, ha='right')
+    plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d')) 
+    
+    plt.tight_layout()
+    plt.show()
+
+def plot_violin_catagories(anomalies_df,cols_to_analyze):
+    plt.figure(figsize=(16, 10))
+    for i, col in enumerate(cols_to_analyze, 1):
+        plt.subplot(2, 2, i)
+        sns.violinplot(
+            data=anomalies_df,
+            hue=col, legend='auto',
+            y='AnomalyScore_normalized',
+            palette='coolwarm',
+            inner='quartile'  # Show median and quartiles
+        )
+        plt.title(f'Distribution by {col}', fontsize=12)
+        plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def plot_mean_bars_catagoies(anomalies_df,cols_to_analyze):
+    plt.figure(figsize=(16, 6))
+    
+    # Calculate mean anomaly score by category for each column
+    for i, col in enumerate(cols_to_analyze, 1):
+        plt.subplot(1, 4, i)
+        anomalies_df.groupby(col)['AnomalyScore_normalized'].mean().sort_values().plot(
+            kind='bar',
+            color=sns.color_palette('rocket'),
+            alpha=0.7
+        )
+        plt.title(f'Mean Score by {col}')
+        plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+# Create a pivot table of mean scores
+def plot_heatmap(anomalies_df):
+    heatmap_data = pd.pivot_table(
+        data=anomalies_df,
+        index='EquipID',  # Primary category
+        columns='EventDesc',  # Secondary category
+        values='AnomalyScore_normalized',
+        aggfunc='mean'
+    )
+    
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(
+        heatmap_data,
+        cmap='viridis',
+        annot=True,
+        fmt=".2f",
+        linewidths=0.5
+    )
+    plt.title('Interaction Effect on Anomaly Score\n(EquipID × Event Description)')
+    plt.tight_layout()
+    plt.show()
     
 if __name__ == "__main__":
     test_date = "2025-03-21"
